@@ -1,16 +1,10 @@
 $(document).ready(function() {
     var repeaterIndex = 1000;
 
-    // Initialize existing repeater fields
-    initializeRepeaterFields();
-
-    function initializeRepeaterFields() {
-        // This function would be called to set up existing fields
-        // For now, we'll handle it in the form rendering
-    }
-
     // Add new repeater field
-    $(document).on('click', '.add-repeater-field', function() {
+    $(document).on('click', '.add-repeater-field', function(e) {
+        e.preventDefault();
+        
         var container = $(this).closest('.repeater-field-container');
         var fieldId = container.data('field-id');
         var template = $('.repeater-field-template[data-field-id="' + fieldId + '"]');
@@ -25,12 +19,17 @@ $(document).ready(function() {
             // Append new field before the template
             template.before(newField);
             
+            // Initialize any datepickers in the new field
+            initializeDatepickers(template.prev());
+            
             repeaterIndex++;
         }
     });
 
     // Remove repeater field
-    $(document).on('click', '.remove-repeater-field', function() {
+    $(document).on('click', '.remove-repeater-field', function(e) {
+        e.preventDefault();
+        
         var fieldGroup = $(this).closest('.repeater-field-group');
         var container = $(this).closest('.repeater-field-container');
         
@@ -63,6 +62,9 @@ $(document).ready(function() {
             
             // Create hidden input with JSON data
             if (values.length > 0) {
+                // Remove any existing hidden input
+                container.find('input[name="repeater_field_' + fieldId + '"]').remove();
+                
                 var hiddenInput = $('<input type="hidden" name="repeater_field_' + fieldId + '" />');
                 hiddenInput.val(JSON.stringify(values));
                 container.append(hiddenInput);
@@ -70,13 +72,30 @@ $(document).ready(function() {
         });
     });
 
-    // Custom field form enhancement
-    if ($('#custom-field-modal').length) {
+    // Initialize datepickers for repeater fields
+    function initializeDatepickers(container) {
+        if (typeof app !== 'undefined' && app.init_datepicker) {
+            container.find('.datepicker').each(function() {
+                app.init_datepicker($(this));
+            });
+        } else {
+            // Fallback for basic datepicker
+            container.find('.datepicker').datepicker({
+                dateFormat: 'yy-mm-dd'
+            });
+        }
+    }
+
+    // Initialize existing datepickers on page load
+    initializeDatepickers($(document));
+
+    // Custom field form enhancement (if on custom fields page)
+    if ($('#custom-field-modal').length || $('.custom-field-form').length) {
         // Add help text for repeater option
-        $('#is_repeater').on('change', function() {
+        $(document).on('change', '#is_repeater', function() {
             if ($(this).is(':checked')) {
                 if (!$('.repeater-help-text').length) {
-                    $(this).closest('.checkbox').after('<div class="alert alert-info repeater-help-text"><small>When enabled, users will see + and - buttons to add/remove multiple values for this field.</small></div>');
+                    $(this).closest('.checkbox, .form-group').after('<div class="alert alert-info repeater-help-text"><small>When enabled, users will see + and - buttons to add/remove multiple values for this field.</small></div>');
                 }
             } else {
                 $('.repeater-help-text').remove();

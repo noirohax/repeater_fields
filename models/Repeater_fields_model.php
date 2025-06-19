@@ -22,7 +22,7 @@ class Repeater_fields_model extends App_Model
         // Insert new values
         if (is_array($values)) {
             foreach ($values as $index => $value) {
-                if (!empty($value)) {
+                if (!empty($value) && trim($value) !== '') {
                     $this->db->insert(db_prefix() . 'customfields_repeater_values', array(
                         'fieldid' => $fieldid,
                         'relid' => $relid,
@@ -67,6 +67,16 @@ class Repeater_fields_model extends App_Model
     }
 
     /**
+     * Get repeater fields by fieldto
+     */
+    public function get_repeater_fields_by_fieldto($fieldto)
+    {
+        $this->db->where('is_repeater', 1);
+        $this->db->where('fieldto', $fieldto);
+        return $this->db->get(db_prefix() . 'customfields')->result_array();
+    }
+
+    /**
      * Check if field is repeater
      */
     public function is_repeater_field($fieldid)
@@ -76,5 +86,14 @@ class Repeater_fields_model extends App_Model
         $result = $this->db->get(db_prefix() . 'customfields')->row();
         
         return $result ? true : false;
+    }
+
+    /**
+     * Update custom field to be repeater
+     */
+    public function make_field_repeater($fieldid, $is_repeater = 1)
+    {
+        $this->db->where('id', $fieldid);
+        return $this->db->update(db_prefix() . 'customfields', array('is_repeater' => $is_repeater));
     }
 }
