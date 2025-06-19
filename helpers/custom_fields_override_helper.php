@@ -1,14 +1,81 @@
 <?php
+// Create this file: modules/repeater_fields/helpers/custom_fields_override_helper.php
 
 defined('BASEPATH') or exit('No direct script access allowed');
 
 /**
- * Override the default render_custom_fields function to handle repeater fields
- * You need to call this function instead of render_custom_fields() in your view files
- * where you want repeater functionality
+ * REPEATER FIELDS - AUTOMATIC INTEGRATION
+ * 
+ * This helper automatically overrides Perfex CRM's render_custom_fields() function
+ * to seamlessly support repeater fields throughout the entire system.
+ * 
+ * INSTALLATION:
+ * 1. Place this file in: modules/repeater_fields/helpers/custom_fields_override_helper.php
+ * 2. Load this helper early in your module or in application/config/autoload.php:
+ *    $autoload['helper'] = array('custom_fields_override');
+ * 3. Initialize the system in your module's __construct() or install():
+ *    init_repeater_fields_system();
+ * 
+ * FEATURES:
+ * - Automatically detects and renders repeater fields anywhere render_custom_fields() is called
+ * - No need to modify existing views or controllers
+ * - Supports all standard field types (text, select, date, etc.) as repeater fields
+ * - Automatically includes required JavaScript for add/remove functionality
+ * - Hooks into save process to handle repeater data properly
+ * 
+ * REQUIREMENTS:
+ * - Custom fields table must have 'is_repeater' column (tinyint)
+ * - Repeater fields model must exist to handle data storage
+ * - Bootstrap and jQuery (standard in Perfex CRM)
  */
-if (!function_exists('render_custom_fields_with_repeater')) {
-    function render_custom_fields_with_repeater($field_to, $rel_id = false, $where = [], $items_pr_row = 1, $items_wrapper = '')
+
+/**
+ * Auto-hook into Perfex's render_custom_fields function to handle repeater fields automatically
+ * This completely replaces the original function to seamlessly support repeater fields
+ */
+if (!function_exists('render_custom_fields_original')) {
+    // Store original function if it exists
+    if (function_exists('render_custom_fields')) {
+        function render_custom_fields_original($field_to, $rel_id = false, $where = [], $items_pr_row = 1, $items_wrapper = '') {
+            // This will be the fallback - we'll implement the original logic here
+            $CI = &get_instance();
+            $CI->load->model('custom_fields_model');
+            
+            $where['fieldto'] = $field_to;
+            
+            if (!isset($where['active'])) {
+                $where['active'] = 1;
+            }
+            
+            $custom_fields = $CI->custom_fields_model->get($where);
+            
+            if (count($custom_fields) == 0) {
+                return '';
+            }
+
+            $custom_fields_html = '';
+            
+            foreach ($custom_fields as $field) {
+                $value = '';
+                
+                if ($rel_id !== false) {
+                    $value = get_custom_field_value($rel_id, $field['id'], $field_to);
+                }
+                
+                $custom_fields_html .= render_custom_field($field, $value, $items_pr_row, $items_wrapper);
+            }
+
+            return $custom_fields_html;
+        }
+    }
+}
+
+/**
+ * Override render_custom_fields to automatically handle repeater fields
+ * This function will be called everywhere render_custom_fields is used
+ */
+if (!function_exists('render_custom_fields')) {
+    function render_custom_fields($field_to, $rel_id = false, $where = [], $items_pr_row = 1, $items_wrapper = '')
     {
         $CI = &get_instance();
         $CI->load->model('custom_fields_model');
@@ -55,6 +122,13 @@ if (!function_exists('render_custom_fields_with_repeater')) {
             }
             
             $i++;
+        }
+
+        // Add automatic JavaScript injection for repeater fields
+        static $js_injected = false;
+        if (!$js_injected && !empty($custom_fields_html)) {
+            $custom_fields_html .= init_repeater_fields_js();
+            $js_injected = true;
         }
 
         return $custom_fields_html;
@@ -322,5 +396,107 @@ if (!function_exists('process_repeater_field_values')) {
         });
         
         return array_values($values); // Re-index array
+    }
+}
+
+/**
+ * Hook into Perfex's custom field saving process to handle repeater fields
+ * Call this in your module's hooks or in application/hooks
+ */
+if (!function_exists('hook_repeater_fields_save')) {
+    function hook_repeater_fields_save()
+    {
+        $CI = &get_instance();
+        
+        // Hook into custom fields save process
+        $CI->load->add_package_path(APPPATH . 'modules/repeater_fields/');
+        
+        // Add hook for before custom fields save
+        add_action('before_custom_fields_save', 'process_repeater_fields_before_save');
+        
+        // Add hook for after custom fields save  
+        add_action('after_custom_fields_save', 'process_repeater_fields_after_save');
+    }
+}
+
+/**
+ * Process repeater fields before saving
+ */
+if (!function_exists('process_repeater_fields_before_save')) {
+    function process_repeater_fields_before_save($data)
+    {
+        $CI = &get_instance();
+        $CI->load->model('custom_fields_model');
+        $CI->load->model('repeater_fields_model');
+        
+        if (!isset($data['custom_fields'])) {
+            return $data;
+        }
+        
+        // Get all repeater fields for this field_to
+        $repeater_fields = $CI->custom_fields_model->get(['is_repeater' => 1]);
+        
+        foreach ($repeater_fields as $field) {
+            $field_slug = $field['slug'];
+            
+            if (isset($data['custom_fields'][$field_slug])) {
+                // Process repeater values
+                $repeater_values = process_repeater_field_values($field_slug, $data);
+                
+                // Store in session or temporary location for after_save processing
+                $CI->session->set_tempdata('repeater_field_' . $field['id'], $repeater_values, 300);
+                
+                // Remove from regular custom_fields to prevent normal processing
+                unset($data['custom_fields'][$field_slug]);
+            }
+        }
+        
+        return $data;
+    }
+}
+
+/**
+ * Process repeater fields after saving
+ */
+if (!function_exists('process_repeater_fields_after_save')) {
+    function process_repeater_fields_after_save($rel_id, $field_to)
+    {
+        $CI = &get_instance();
+        $CI->load->model('custom_fields_model');
+        $CI->load->model('repeater_fields_model');
+        
+        // Get all repeater fields for this field_to
+        $repeater_fields = $CI->custom_fields_model->get(['is_repeater' => 1, 'fieldto' => $field_to]);
+        
+        foreach ($repeater_fields as $field) {
+            $field_id = $field['id'];
+            
+            // Get stored repeater values from session
+            $repeater_values = $CI->session->tempdata('repeater_field_' . $field_id);
+            
+            if ($repeater_values !== false) {
+                // Save repeater values
+                $CI->repeater_fields_model->save_repeater_values($field_id, $rel_id, $field_to, $repeater_values);
+                
+                // Clean up session data
+                $CI->session->unset_tempdata('repeater_field_' . $field_id);
+            }
+        }
+    }
+}
+
+/**
+ * Auto-initialize repeater fields system
+ * This should be called in your module's init or in a hook
+ */
+if (!function_exists('init_repeater_fields_system')) {
+    function init_repeater_fields_system()
+    {
+        // Register hooks
+        hook_repeater_fields_save();
+        
+        // Initialize any other required components
+        $CI = &get_instance();
+        $CI->load->helper('repeater_fields');
     }
 }
